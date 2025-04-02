@@ -1,0 +1,303 @@
+---
+title: "DA_HW5"
+author: "Howard"
+date: "2025-04-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1
+### **Prepare dataset**
+- Convert the 400 images into a 400 × 2576 data matrix. 
+```{r}
+library(png)
+image_dir <- "D:/DA_HW/DAHW/ORL Faces"
+image_files <- list.files(image_dir, pattern = "\\.png$", full.names = TRUE)
+n <- length(image_files)
+if(n != 400){
+  stop("Expected 400 images, but found ", n)
+}
+data_matrix <- matrix(NA, nrow = n, ncol = 46 * 56)
+for (i in 1:n) {
+  img <- readPNG(image_files[i])
+  data_matrix[i, ] <- as.vector(t(img))
+}
+dim(data_matrix)
+```
+- Add an additional column indicating the physical gender label (same in HW2) .
+```{R}
+subject_ids <- rep(1:40, each = 10)
+subject_gender <- c(0,rep(1,6),0,1,0,1,0,rep(1,19),0,rep(1,8))
+gender_labels <- subject_gender[subject_ids]
+final_data <- cbind(data_matrix, gender = gender_labels)
+dim(final_data)
+```
+### (a) Identify the value of\(\lambda\) that minimum MSE in both LASSO and Ridge regression models.
+- **Using cross-validation to get \(\lambda\)**
+```{r,warning=FALSE}
+library(glmnet)
+# Split to X and y
+X <- as.matrix(final_data[,-2577])
+
+# y as an binary 
+y_bin <- as.matrix(final_data[,2577]) 
+
+# Set up cross-validation for LASSO
+cv_lasso <- cv.glmnet(X, y_bin, alpha = 1, family = "binomial", type.measure = "mse")
+lambda_min_lasso <- cv_lasso$lambda.min
+
+# Set up cross-validation for Ridge
+cv_ridge <- cv.glmnet(X, y_bin, alpha = 0, family = "binomial", type.measure = "mse")
+lambda_min_ridge <- cv_ridge$lambda.min
+
+# Print optimal lambdas
+cat("Lasso optimal lambda:", lambda_min_lasso, "\n")
+cat("Ridge optimal lambda:", lambda_min_ridge, "\n")
+```
+### **Compare the selected features**
+```{r}
+#  selected features
+lasso_coef <- coef(cv_lasso, s = "lambda.min")
+ridge_coef <- coef(cv_ridge, s = "lambda.min")
+selected_features_lasso <- which(lasso_coef != 0)[-1]  #exclude intercept
+selected_features_ridge <- which(ridge_coef != 0)[-1]
+cat("Numbers of selected features from lasso:",length(selected_features_lasso),"\n\n")
+cat("Numbers of selected features from ridge:",length(selected_features_ridge),"\n\n")
+```
+#### Observation
+- Ridge regression will keep all the features nonzero.
+- Lasso regression will selected the important features from the full model.
+- According to the HW2, stepwise selected 14 features while lasso selected 96 features.
+
+### **The model performance**
+```{r}
+mse_lasso <- min(cv_lasso$cvm)
+mse_ridge <- min(cv_ridge$cvm)
+cat("lasso MSE:", mse_lasso,"\n")
+cat("ridge MSE:", mse_ridge,"\n")
+```
+#### Observation 
+- The MSE of ridge and lasso is almost the same.
+- Ridge MSE has a little bit higher than lasso.
+
+### (b)Plot the chosen pixels from Lasso on \(46 \times 56\) canvas.
+```{r, warning=FALSE}
+# Initialize all zeros
+important_pixel_map <- rep(0, 46 * 56)
+
+# Mark selected pixel indices as 1
+important_pixel_map[selected_features_lasso] <- 1
+
+# Convert to a 46x56 matrix. We assume row-major flattening.
+pixel_matrix <- matrix(important_pixel_map, nrow = 46, ncol = 56, byrow = TRUE)
+
+# We'll use base R's image() function with two colors:
+image(1:56, 1:46,
+      t(apply(pixel_matrix, 2, rev)),  # flip to put row=1 at top
+      col = c("white", "red"),
+      xlab = "Column (1→56)",
+      ylab = "Row (1→46)",
+      main = "Lasso Selected Pixels")
+
+
+
+```
+
+### Problem 2(a): Estimate \(\beta_1\) and \(\beta_2\) (unconstrained Cobb-Douglas)
+
+- The model is:
+\[
+  V_t = \alpha K_t^{\beta_1} L_t^{\beta_2} \eta_t
+\]
+- Taking logs:
+\[
+  log(V_t) = log(\alpha) + \beta_1 log(K_t) + \beta_2 log(L_t) + log(\eta_t)
+\]
+
+- So we can fit this using linear regression.
+
+```{r}
+# Data
+year <- 72:86
+capital <- c(1209188, 1330372, 1157371, 1070860, 1233475, 1355769, 1351667, 1326248, 1089545, 1111942, 988165, 1069651, 1191677, 1246536, 1281262)
+labor <- c(1259142, 1371795, 1263084, 1118226, 1274345, 1369877, 1451595, 1328683, 1077207, 1056231, 947502, 1057159, 1169442, 1195255, 1171664)
+value_added <- c(11150.0, 12853.6, 10450.8, 9318.3, 12097.7, 12844.8, 13309.9, 13402.3, 8571.0, 8739.7, 8140.0, 10958.4, 10838.9, 10030.5, 10836.5)
+
+# Log-transform
+log_K <- log(capital)
+log_L <- log(labor)
+log_V <- log(value_added)
+
+# Fit unconstrained linear model
+model_unconstrained <- lm(log_V ~ log_K + log_L)
+summary(model_unconstrained)
+```
+### Results:
+- \(\hat{\beta_1}\) is 0.5057
+- \(\hat{\beta_2}\) is 0.8455
+
+### Problem 2(b): Re-estimate with constraint \(\beta_1\) + \(\beta_2\) = 1
+
+- Substitute 
+\begin{align*}
+\log(V_t) &= \log(\alpha) + \beta_1 \log(K_t) + (1 - \beta_1) \log(L_t) \\
+&\Rightarrow \log(V_t) = \log(\alpha) + \beta_1 (\log(K_t) - \log(L_t)) + \log(L_t)
+\end{align*}
+
+\text{So define:}
+
+\[
+Z_t = \log(K_t) - \log(L_t)
+\]
+
+```{r}
+# Create transformed variable Z = log(K) - log(L)
+Z <- log_K - log_L
+
+# Fit constrained model: log(V) = a + b * Z + log(L)
+model_constrained <- lm(log_V - log_L ~ Z)
+summary(model_constrained)
+
+# Recover β₁ and β₂
+beta1_constrained <- coef(model_constrained)[2]
+beta2_constrained <- 1 - beta1_constrained
+alpha_constrained <- exp(coef(model_constrained)[1])
+
+cat("Under beta_1 + beta_2 = 1 constraint:\n")
+cat("  alpha =", alpha_constrained, "\n")
+cat("  beta_1 =", beta1_constrained, "\n")
+cat("  beta_2 =", beta2_constrained, "\n")
+```
+### Problem3 (a): Create a PCA function in R as following:
+
+#### **Input**: 
+
+- Data matrix `x`
+- Boolean `isCorrMX`: if `TRUE`,use correlation matrix, if `FALSE`, use covariance matrix.
+
+#### **Output**: 
+
+- Loading matrix (eigenvectors)
+- Eigenvalue vector
+- Score matrix(PCs)
+- Screen plot
+
+```{r}
+myPCA <- function(X, isCorrMX = FALSE) {
+  # Center the data
+  X_centered <- scale(X, center = TRUE, scale = FALSE)
+  
+  # Use correlation or covariance matrix
+  S <- if (isCorrMX) cor(X_centered) else cov(X_centered)
+  
+  # Spectral decomposition
+  eig <- eigen(S)
+  eig_values <- eig$values
+  eig_vectors <- eig$vectors
+  
+  # Scores (projected data)
+  scores <- X_centered %*% eig_vectors
+  
+  # Scree plot
+  var_explained <- eig_values / sum(eig_values)
+  cum_var <- cumsum(var_explained)
+  
+  barplot(var_explained, main = "Scree Plot", xlab = "PC", ylab = "Proportion of Variance", ylim = c(0,1.005), col = "lightblue")
+  lines(x = 1:length(cum_var), y = cum_var, type = "b", col = "red", pch = 16)
+  return(list(
+    loadings = eig_vectors,
+    eigenvalues = eig_values,
+    scores = scores,
+    explained_variance = var_explained,
+    cumulative_variance = cum_var
+  ))
+}
+```
+
+### Problem3 (b): Demonstrate using the AutoMPG dataset
+- Choose continous features in `mtcars`
+```{r}
+# Load AutoMPG 
+data <- mtcars[, c("mpg", "cyl", "disp", "hp", "drat", "wt", "qsec")]
+
+# Apply PCA with covariance matrix
+pca_cov <- myPCA(data, isCorrMX = FALSE)
+pca_cov$loadings
+pca_cov$eigenvalues
+pca_cov$scores
+# Apply PCA with correlation matrix
+pca_cor <- myPCA(data, isCorrMX = TRUE)
+pca_cor$loadings
+pca_cor$eigenvalues
+pca_cor$scores
+```
+### Is PCA scale-invariant ?
+
+- PCA is not scale-invariant when using covariance matrix, because features with large variance dominate the PCs.
+- Using the correlation matrix makes PCA scale-invariant, giving equal weight to each feature.
+
+### Problem 4 (a) :
+- Run PCA, and determine the number of PCs
+
+```{r}
+X <- t(data_matrix)
+
+# Apply custom PCA
+pca_result <- myPCA(t(X), isCorrMX = FALSE)
+
+# Extract cumulative variance
+cum_var <- pca_result$cumulative_variance
+
+# Thresholds
+thresholds <- c(0.5, 0.6, 0.7, 0.8, 0.9)
+
+# Find number of PCs for each threshold
+num_pcs_needed <- sapply(thresholds, function(th) which(cum_var >= th)[1])
+
+# Print results
+thresholds_percent <- thresholds * 100
+for (i in seq_along(thresholds)) {
+  cat(sprintf("To explain at least %d%% variance, need %d PCs\n", thresholds_percent[i], num_pcs_needed[i]))
+}
+
+```
+### Problem 4 (b): 
+- Rescale the first PC to the range [0,255], reshape it into a \(46 \times 56 \) matrix, and visualize it as a grayscale image using the scaled PC score. 
+
+```{r}
+# Extract first loading (eigenvector)
+pc1 <- pca_result$loadings[, 1]
+
+# Scale to [0, 255]
+pc1_scaled <- 255 * (pc1 - min(pc1)) / (max(pc1) - min(pc1))
+
+# Reshape to 46 x 56
+pc1_matrix <- matrix(pc1_scaled, nrow = 46, ncol = 56)
+
+```
+- Use `ggplot` to visulize
+```{r}
+# Visualize grayscale
+# Step 5: High-quality grayscale visualization using ggplot2
+library(ggplot2)
+library(reshape2)
+
+# Convert matrix to data frame for ggplot
+pc1_df <- melt(pc1_matrix)
+colnames(pc1_df) <- c("y", "x", "value")
+
+# Invert y-axis to display image properly (top to bottom)
+pc1_df$y <- max(pc1_df$y) - pc1_df$y + 1
+
+# Plot with ggplot2
+ggplot(pc1_df, aes(x = x, y = y, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "black", high = "white") +
+  theme_void() +
+  coord_fixed() +
+  ggtitle("First Principal Component (PC1) - 46 × 56 Grayscale Image") +
+  theme(plot.title = element_text(hjust = 0.5))
+```

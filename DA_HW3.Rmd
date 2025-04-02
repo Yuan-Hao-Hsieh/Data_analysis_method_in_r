@@ -1,0 +1,52 @@
+---
+title: "HW3 Problem7"
+author: "Howard"
+date: "2025-03-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 7
+
+- Calculate all the `VIFs` in the “autompg” dataset and discuss your observation. 
+
+```{r, warning=FALSE}
+# Load required packages
+library(readxl)   # to read Excel files
+library(dplyr)    # for data manipulation
+library(car)      # for computing VIFs
+
+# Read the auto-mpg dataset from the Excel file
+df <- read_excel("Auto-mpg/auto-mpg.xlsx")
+
+# Inspect the structure of the dataset
+str(df)
+
+# If there is a non-numeric column (e.g., 'name'), remove it.
+# Here we keep only numeric columns.
+df <- df %>% select_if(is.numeric)
+
+# For a typical auto-mpg dataset, assume 'mpg' is the response variable.
+# Fit a linear regression model with mpg as response and the rest as predictors.
+model <- lm(mpg ~ ., data = df)
+
+# Display a summary of the model
+summary(model)
+
+# Compute the Variance Inflation Factors (VIFs) for all predictors
+vif_values <- vif(model)
+print(vif_values)
+
+```
+### Discussion of findings
+
+- **High VIFs**: Variables such as `cylinders`, `displacement`, `horsepower`, and `weight` are often highly correlated. High VIF values (commonly above 5 or 10) for these predictors indicate strong multicollinearity. This suggests that their estimated coefficients may have inflated standard errors and be less reliable for inference.
+
+- **Low VIFs**: Predictors such as `acceleration`, `model_year`, or `origin` may exhibit lower VIFs, implying they are less collinear with the other predictors.
+
+- **Implication**: High multicollinearity does not affect prediction accuracy much but makes it difficult to assess the individual contribution of each predictor. Remedies might include removing or combining collinear variables.
+
+
