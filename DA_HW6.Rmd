@@ -1,0 +1,282 @@
+---
+title: "DA_HW6"
+author: "Howard"
+date: "2025-04-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Problem 1(a) : Implement a FA function
+
+#### **Input**: 
+
+- Data matrix `data`
+- Selected number of factors `num_factors`
+- Boolean `scale_data`: if `TRUE`,use correlation matrix, if `FALSE`, use covariance matrix.
+
+#### **Output**: 
+
+- Loading matrix $\textbf{A}$:representing the weight of each variable on each factor.
+- Factor score matrix $\textbf{F}$: scores for each observation across the extracted factors.
+- Communality vector \(h_i^2\) :total variance in variable \(i\) explained by the factors
+- Uniqueness vector \(\psi_i\): residual variance in variable \(i\) not explained by the factors
+- Proportion of variance explained by each factor
+
+```{r}
+# Define a custom Factor Analysis function
+fa_function <- function(data, num_factors, scale_data = TRUE) {
+  
+  if (scale_data) {
+    X <- scale(data)
+  } else {
+    X <- data
+  }
+  
+  # Compute the correlation matrix 
+  R <- cor(X)
+  
+  # Perform eigen-decomposition of the correlation matrix
+  eigen_R <- eigen(R)
+  eigenvalues <- eigen_R$values
+  eigenvectors <- eigen_R$vectors
+  
+  # Select the top 'num_factors' eigenvalues and eigenvectors.
+  # Compute the loading matri A by scaling the eigenvectors with the square     roots of the eigenvalues.
+  
+  A <- diag(sqrt(eigenvalues[1:num_factors])) %*%  
+    t(eigenvectors[, 1:num_factors])
+    
+  # Compute communalities : for each variable, sum of squared loadings across factors.
+  
+  communalities <- colSums(A^2)
+  
+  # Compute uniquenesses : residual (variable-specific) variance that is not explained by the factors.
+  # For a correlation matrix, the total variance for each variable is 1.
+
+  uniquenesses <- 1 - communalities
+  
+  # Calculate the proportion of variance explained by each factor.
+  # For a correlation matrix, the total variance is equal to the number of variables.
+  p <- ncol(data)
+  prop_variance <- eigenvalues[1:num_factors] / p
+  
+  # Factor score computation using the regression (Thomson) method.
+  # The formula is:
+  #     F = X_std %*% B, where
+  #     B = psi_inv %*% A %*% solve(t(A) %*% psi_inv %*% A)
+  # psi_inv is a diagonal matrix with the reciprocal uniquenesses.
+  psi_inv <- diag(1 / uniquenesses)
+  B <- psi_inv %*% t(A) %*% solve(A %*% psi_inv %*% t(A))
+  
+  
+  # Compute factor scores for all observations.
+  factor_scores <- X %*% B
+  
+  # Return all calculated outputs in a list
+  return(list(
+    loadings = t(A),
+    factor_scores = factor_scores,
+    communalities = t(communalities),
+    uniquenesses = t(uniquenesses),
+    prop_variance = prop_variance
+  ))
+}
+```
+
+### Problem 1(b) Apply your FA function to the AutoMPG dataset using 2 factors.
+```{r}
+# Load AutoMPG 
+AutoMPG <- mtcars[, c("mpg", "cyl", "disp", "hp", "drat", "wt", "qsec")]
+fa_result <- fa_function(AutoMPG,2)
+Loading  <- fa_result$loadings
+rownames(Loading) <- c("mpg", "cyl", "disp", "hp", "drat", "wt", "qsec")
+colnames(Loading) <- c("a_1i","a_2i")
+Loading
+factor_scores <- fa_result$factor_scores
+colnames(factor_scores) <- c("factor1","factor2")
+factor_scores
+communalities <- fa_result$communalities
+colnames(communalities) <- c("mpg", "cyl", "disp", "hp", "drat", "wt", "qsec")
+communalities
+uniquenesses <- fa_result$uniquenesses
+colnames(uniquenesses) <- c("mpg", "cyl", "disp", "hp", "drat", "wt", "qsec")
+uniquenesses
+fa_result$prop_variance
+```
+### Observation 
+
+- In PCA, the first PC1 is to explain about 72% of the total variance of the data, while the factor1 is almost explain  the same 72% of the total varaince.
+
+- FA can see the communalites and the uniquess of each feature, while PCA can not see these details. 
+
+### Problem 2
+  Transpose the ORL face dataset to let 𝐗 be a 2576 × 400 data matrix. Perform the factor analysis on 𝐗 withthe FA function of your implementation in EX1. 
+
+#### (a) Determine the number of factors required to explain at least 50%, 60%, 70%, 80%, and 90% of the total variance in the transposed ORL dataset.
+
+- Convert the 400 images into a 400 × 2576 data matrix and add an additional column indicating the physical gender label.
+```{r}
+library(png)
+image_dir <- "D:/DA_HW/DAHW/ORL Faces"
+image_files <- list.files(image_dir, pattern = "\\.png$", full.names = TRUE)
+n <- length(image_files)
+if(n != 400){
+  stop("Expected 400 images, but found ", n)
+}
+data_matrix <- matrix(NA, nrow = n, ncol = 46 * 56)
+for (i in 1:n) {
+  img <- readPNG(image_files[i])
+  data_matrix[i, ] <- as.vector(t(img))
+}
+```
+
+- Factor analysis, and build the thresholds to determine the numbers of factors.
+
+```{r}
+X <- t(data_matrix)
+X_std <- scale(X)
+
+# Compute the correlation matrix of the 400 variables (images)
+R <- cor(X_std)
+
+# Perform eigen decomposition
+eigen_R <- eigen(R)
+eigenvalues <- eigen_R$values
+
+# The total variance in a correlation matrix is equal to the number of variables.
+total_variance <- ncol(X_std)  
+
+# Compute cumulative proportion of variance explained by the factors.
+cum_prop <- cumsum(eigenvalues) / total_variance
+
+# Define the thresholds 
+thresholds <- c(0.5, 0.6, 0.7, 0.8, 0.9)
+
+# For each threshold, determine the minimum number of factors required.
+factors_required <- sapply(thresholds, function(t) {
+  min(which(cum_prop >= t))
+})
+
+# Print results
+results <- data.frame(
+  Threshold = thresholds,
+  NumFactors = factors_required,
+  CumulativeVariance = cum_prop[factors_required]
+)
+print(results)
+
+```
+#### (b)Assuming 80% of the total variance is explained, rescale the first extracted factor to the range [0, 255]. Then, reshape the 2576 × 1 vector into a 46 × 56 matrix and visualize it as a grayscale image. 
+
+```{r}
+num_factors_80 <- factors_required[which(thresholds == 0.8)]
+
+# Run FA on the transposed ORL dataset X with num_factors_80 factors.
+fa_results <- fa_function(X, num_factors = num_factors_80)
+
+# Extract the first factor score vector (2576 x 1)
+first_factor <- fa_results$factor_scores[, 1]
+
+# Rescale the first factor to the range [0, 255]
+first_factor_scaled <- (first_factor - min(first_factor)) / (max(first_factor) - min(first_factor)) * 255
+
+# Reshape the 2576-length vector into a 46 x 56 matrix.
+# Depending on the order (row-major or column-major) you prefer, adjust the 'byrow' parameter.
+face_matrix <- matrix(first_factor_scaled, nrow = 46, ncol = 56, byrow = TRUE)
+
+# Visualize the matrix as a grayscale image.
+# The image() function plots using a default orientation, so you may adjust the axes if needed.
+image(face_matrix,
+      col = gray.colors(256, start = 0, end = 1),
+      main = "Rescaled First Factor as a Grayscale Image",
+      xlab = "Pixel Column", ylab = "Pixel Row")
+```
+
+### Problem 3 Use a suitable package or library to perform Partial Least Squares Regression (PLSR) on the AutoMPG dataset.Randomly select 300 cars to build the model, and use the remaining 92 cars for testing.
+
+#### Import dataset and split
+```{r}
+library(readxl)
+auto_mpg <- read_excel("Auto-mpg/auto-mpg.xlsx")
+colnames(auto_mpg)
+set.seed(123) # For reproducibility
+n <- nrow(auto_mpg)
+train_index <- sample(1:n, size = 300) # Randomly select the train data
+train <- auto_mpg[train_index,]
+test <- auto_mpg[-train_index,]
+```
+
+### (a) Univariate PLRS : y = mpg
+```{R}
+library(pls)
+# Fit the PLSR model with cross-validation to help choose the number of components.
+fit_univ <- plsr(mpg ~ cylinders + displacement + horsepower + weight + acceleration + `model year` + origin, data = train, validation = "CV")
+
+# RMSEP() returns the cross-validated error; the optimal ncomp minimizes this error.
+univ_rmsep <- RMSEP(fit_univ)
+# The RMSEP object has a 'val' component. The first entry (ncomp=0) is the baseline.
+# Find the index (number of components) that minimizes RMSEP for mpg.
+optimal_univ <- which.min(univ_rmsep$val[1,1 ,1:8]) - 1
+cat("Optimal number of components (univariate):", optimal_univ, "\n")
+
+# Predict mpg for the test set using the chosen number of components.
+pred_univ <- predict(fit_univ, newdata = test, ncomp = optimal_univ)
+# Compute the Root Mean Squared Error of Prediction (RMSEP) on the test set.
+rmsep_univ <- sqrt(mean((test$mpg - pred_univ)^2))
+cat("Test RMSEP (univariate mpg):", rmsep_univ, "\n")
+```
+### (b) Extend the response variable to a multivariate case: 𝑦 = [mpg model year]. Analyze the model’s test performance and specifically compare the predicted mpg results between this multivariate case and the univariate case in part (a).
+
+```{r}
+fit_multi <- plsr(cbind(mpg, `model year`) ~ cylinders + displacement + horsepower + weight + acceleration + origin, 
+                  data = train, validation = "CV")
+
+# Determine the optimal number of components based on the response "mpg".
+# RMSEP for multivariate responses is returned for each response.
+multi_rmsep <- RMSEP(fit_multi)
+# We select the number of components minimizing the RMSEP for mpg.
+optimal_multi <- which.min(univ_rmsep$val[1,1 ,1:7]) - 1
+cat("Optimal number of components (multivariate):", optimal_multi, "\n")
+
+# Predict the responses for the test set using the chosen number of components.
+pred_multi <- predict(fit_multi, newdata = test, ncomp = optimal_multi)
+
+
+# We take the first response (mpg); the second response is model.year.
+pred_multi_mpg <- pred_multi[, "mpg", ]
+
+# Compute RMSEP for mpg from the multivariate model.
+rmsep_multi <- sqrt(mean((test$mpg - pred_multi_mpg)^2))
+cat("Test RMSEP (multivariate, mpg):", rmsep_multi, "\n")
+```
+### Discussion
+
+#### Univariate PLSR Model:
+
+- Uses mpg as the sole response variable.
+
+- Cross-validation determines the optimal number of latent components to minimize RMSEP.
+
+- The test set RMSEP for mpg is calculated directly from the univariate model predictions.
+
+#### Multivariate PLSR Model:
+
+- Models mpg together with `model year` as joint responses.
+
+- Optimal components are chosen based on minimizing the RMSEP for predicting mpg.
+
+- The model extracts shared variance between mpg and `model year`, which could benefit the predictive accuracy for mpg.
+
+#### Comparison of Results:
+- Both models are compared primarily using the `RMSEP` for mpg predictions on the test set.
+
+- The univariate model's RMSEP is lower, it indicates that including model.year might add unnecessary complexity or noise.
+
+- The difference in the optimal number of components between the two approaches also provides insight into model complexity and the latent structure captured by each method.
+
+
+
+

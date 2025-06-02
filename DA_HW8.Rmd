@@ -1,0 +1,332 @@
+---
+title: "DA_HW8"
+author: "Howard"
+date: "2025-04-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1
+- Apply 𝑘-means and hierarchical clustering on the ORL face dataset. Set $𝑘 = 2$ in 𝑘-means and select 2
+clusters in hierarchical clustering. Compare the clustering labels with the true gender labels and evaluate the
+clustering performance using appropriate metrics.
+
+### **Prepare dataset**
+- Convert the 400 images into a 400 × 2576 data matrix. 
+```{r}
+library(png)
+image_dir <- "D:/DA_HW/DAHW/ORL Faces"
+image_files <- list.files(image_dir, pattern = "\\.png$", full.names = TRUE)
+n <- length(image_files)
+if(n != 400){
+  stop("Expected 400 images, but found ", n)
+}
+data_matrix <- matrix(NA, nrow = n, ncol = 46 * 56)
+for (i in 1:n) {
+  img <- readPNG(image_files[i])
+  data_matrix[i, ] <- as.vector(t(img))
+}
+dim(data_matrix)
+```
+
+- Add an additional column indicating the physical gender label (same in HW2) .
+```{R}
+subject_ids <- rep(1:40, each = 10)
+subject_gender <- c(0,rep(1,6),0,1,0,1,0,rep(1,19),0,rep(1,8))
+gender_labels <- subject_gender[subject_ids]
+final_data <- cbind(data_matrix, gender = gender_labels)
+dim(final_data)
+```
+### Separate into `X` and `y`
+```{r}
+X <- as.matrix(final_data[, -ncol(final_data)])  # All columns except last are features
+y_true <- as.factor(final_data[, ncol(final_data)])  # Last column is the gender label (0=female, 1=male)
+```
+
+### K-means Clustering
+- `nstart` = 20 is regenerating 20 different start points,and choose the one with minimal residual.
+```{r}
+set.seed(123)  # for reproducibility
+kmeans_result <- kmeans(X, centers = 2, nstart = 20)
+kmeans_labels <- as.factor(kmeans_result$cluster)
+```
+
+### Hierarchical Clustering 
+```{r}
+distance_matrix <- dist(X)  # compute distance
+hc_model <- hclust(distance_matrix, method = "ward.D2")
+hc_labels <- cutree(hc_model, k = 2)  # cut tree into 2 clusters
+hc_labels <- as.factor(hc_labels)
+```
+
+### Evaluate Clustering Performance
+```{r,warning=FALSE}
+library(cluster)
+library(factoextra)
+library(lattice)
+
+# Function to calculate Accuracy after best label matching
+match_labels <- function(predicted, true) {
+  table_mat <- table(predicted, true)
+  acc1 <- sum(diag(table_mat)) / length(true)
+  acc2 <- sum(diag(t(table_mat))) / length(true)
+  return(max(acc1, acc2))
+}
+
+kmeans_accuracy <- match_labels(kmeans_labels, y_true)
+hc_accuracy <- match_labels(hc_labels, y_true)
+
+kmeans_accuracy
+hc_accuracy
+
+```
+### Confusion Matrix
+```{r,warning=FALSE}
+library(mclust)  # 只要這一行
+kmeans_table <- table(kmeans_labels, y_true)
+hc_table <- table(hc_labels, y_true)
+# Adjusted Rand Index
+kmeans_ari <- adjustedRandIndex(kmeans_labels, y_true)
+hc_ari <- adjustedRandIndex(hc_labels, y_true)
+
+```
+
+### Output Result
+```{r}
+cat("K-means Clustering Results:\n")
+print(kmeans_table)
+cat("Accuracy:", kmeans_accuracy, "\n")
+cat("Adjusted Rand Index:", kmeans_ari, "\n\n")
+
+cat("Hierarchical Clustering Results:\n")
+print(hc_table)
+cat("Accuracy:", hc_accuracy, "\n")
+cat("Adjusted Rand Index:", hc_ari, "\n")
+
+```
+### Visualization
+```{r,warning=FALSE}
+library(factoextra)
+
+# Plot dendrogram
+fviz_dend(hc_model, k = 2, rect = TRUE)
+
+# PCA Plot colored by k-means result
+library(ggplot2)
+pca_res <- prcomp(X, scale. = TRUE)
+pca_df <- data.frame(PC1 = pca_res$x[, 1], PC2 = pca_res$x[, 2], cluster = kmeans_labels)
+
+ggplot(pca_df, aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point() +
+  ggtitle("K-means Clustering on ORL Dataset (PCA Projection)")
+
+
+```
+
+### Clustering Results Summary
+
+#### K-means Clustering:
+
+**Interpretation**:
+
+- Clustering results are close to random guessing.
+
+- Negative ARI suggests no meaningful agreement with the true gender labels.
+
+- Indicates that K-means failed to capture gender-distinguishing features from the image
+
+#### Hierarchical Clustering (Ward’s method):
+
+**Interpretation**:
+
+- Slightly better than K-means, but still weak.
+
+- Low ARI shows minimal alignment with the true gender structure.
+
+- Suggests that hierarchical clustering has limited utility on raw pixel features.
+
+### Problem 2. Clustering: Advantages and Limitations
+
+#### Advantages :
+- **No Label Requirement:** Clustering can uncover hidden patterns in unlabeled data, enabling unsupervised learning where labels are unavailable or expensive to obtain.
+- **Flexibility:** Various clustering algorithms (e.g., k-means, DBSCAN, hierarchical) allow flexibility in modeling different types of data distributions and structures.
+- **Pattern Discovery:** Clustering helps reveal the intrinsic grouping within the data, facilitating exploratory data analysis and hypothesis generation.
+- **Reduced Computational Load (for simple algorithms):** Basic methods like k-means have relatively low computational cost compared to complex supervised models, making them suitable for large datasets.
+
+#### Limitations:
+- **Interpretability Challenges:** Clusters may not have a clear real-world meaning, making interpretation subjective or difficult without domain knowledge.
+- **Sensitivity to Hyperparameters:** Performance highly depends on algorithm parameters (e.g., number of clusters `k`, distance metrics), and tuning them is often non-trivial.
+- **Assumption Limitations:** Many clustering algorithms make assumptions (e.g., spherical clusters for k-means) that may not match the true data structure, leading to poor clustering.
+- **Scalability Issues (for complex algorithms):** Methods like hierarchical clustering have high time and space complexity (`O(n^2)`), making them impractical for very large datasets.
+
+### Problem 3 
+- Perform clustering on the AutoMPG dataset using 𝑘-means, hierarchical clustering, and DBSCAN. Use only the numerical variables (excluding the “origin” label) as input features.
+
+- Load AutoMPG data.
+```{r,warning=FALSE}
+library(readxl)
+auto_data <- read_excel("Auto-mpg/auto-mpg.xlsx")
+
+# Select only numeric features excluding 'origin'
+numeric_cols <- sapply(auto_data, is.numeric)
+numeric_cols["origin"] <- FALSE  # exclude origin
+X_auto <- as.matrix(auto_data[, numeric_cols])
+
+# True labels
+y_origin <- as.factor(auto_data$origin)
+```
+
+- K-means clustering
+```{r}
+set.seed(123)
+kmeans_auto <- kmeans(X_auto, centers = 3, nstart = 20)
+kmeans_labels_auto <- as.factor(kmeans_auto$cluster)
+```
+
+- Hierarchical clustering
+```{r}
+dist_auto <- dist(X_auto)
+hc_auto <- hclust(dist_auto, method = "ward.D2")
+hc_labels_auto <- cutree(hc_auto, k = 3)
+hc_labels_auto <- as.factor(hc_labels_auto)
+```
+
+- DBSCAN clustering
+```{r}
+
+library(dbscan)
+kNNdistplot(X_auto, k = 5)  # k設5
+abline(h = 100, col = "red")
+```
+
+```{r}
+library(dbscan)
+dbscan_auto <- dbscan(X_auto, eps = 100, minPts = 5)
+dbscan_labels_auto <- as.factor(dbscan_auto$cluster)
+
+```
+
+- **Evaluation**
+```{r}
+match_labels <- function(predicted, true) {
+  table_mat <- table(predicted, true)
+  acc1 <- sum(diag(table_mat)) / length(true)
+  acc2 <- sum(diag(t(table_mat))) / length(true)
+  return(list(
+    accuracy = max(acc1, acc2),
+    confusion = table_mat
+  ))
+}
+
+# --- Evaluate k-means ---
+kmeans_eval <- match_labels(kmeans_labels_auto, y_origin)
+
+# --- Evaluate hierarchical ---
+hc_eval <- match_labels(hc_labels_auto, y_origin)
+
+# --- Evaluate DBSCAN ---
+dbscan_eval <- match_labels(dbscan_labels_auto, y_origin)
+
+# --- Output ---
+cat("=== K-means Clustering ===\n")
+print(kmeans_eval$confusion)
+cat("Accuracy:", kmeans_eval$accuracy, "\n\n")
+
+cat("=== Hierarchical Clustering ===\n")
+print(hc_eval$confusion)
+cat("Accuracy:", hc_eval$accuracy, "\n\n")
+
+cat("=== DBSCAN Clustering ===\n")
+print(dbscan_eval$confusion)
+cat("Accuracy:", dbscan_eval$accuracy, "\n")
+```
+
+### Clustering Results Summary
+
+#### K-means Clustering
+- **Accuracy:** 42.6%
+- **Confusion Matrix:**
+  - Cluster 1: 96 (true 1), 17 (true 2), 9 (true 3)
+  - Cluster 2: 89 (true 1), 1 (true 2), 0 (true 3)
+  - Cluster 3: 60 (true 1), 50 (true 2), 70 (true 3)
+- **Analysis:**
+  - K-means clustering showed weak separation.
+  - Significant overlap between clusters.
+
+#### Hierarchical Clustering
+- **Accuracy:** 53.3%
+- **Confusion Matrix:**
+  - Cluster 1: 129 (true 1), 3 (true 2), 0 (true 3)
+  - Cluster 2: 88 (true 1), 27 (true 2), 26 (true 3)
+  - Cluster 3: 28 (true 1), 38 (true 2), 53 (true 3)
+- **Analysis:**
+  - Better separation than k-means.
+  - Particularly good at identifying USA-origin vehicles (origin = 1).
+
+#### DBSCAN Clustering
+- **Accuracy:** 17.9%
+- **Confusion Matrix:**
+  - Cluster 0 (noise): 2 (true 1), 0 (true 2), 2 (true 3)
+  - Cluster 1: 228 (true 1), 68 (true 2), 77 (true 3)
+  - Cluster 2: 10 (true 1), 0 (true 2), 0 (true 3)
+  - Cluster 3: 5 (true 1), 0 (true 2), 0 (true 3)
+- **Analysis:**
+  - DBSCAN failed to form meaningful clusters.
+  - Most points assigned to a single cluster.
+
+### Overall Conclusion
+- **Hierarchical clustering** achieved the best performance among the three methods.
+- **DBSCAN** was unsuitable for the AutoMPG dataset due to poor density-based separability.
+- **Clustering without supervision** shows clear limitations compared to supervised classification methods.
+
+
+## Comparison with Supervised Learning (HW7)
+
+### Supervised Learning Results
+- **Logistic Regression Accuracy:** 70.9%
+- **KNN Accuracy:** 63.3%
+- **SVM Accuracy:** 70.9%
+
+### Analysis
+- Supervised models (Logistic Regression, SVM, KNN) achieved significantly higher accuracies compared to unsupervised clustering models.
+- Logistic Regression and SVM demonstrated strong performance with accuracy around 71%, much higher than any clustering method.
+- KNN showed decent performance at 63.3%, still better than clustering approaches.
+
+### Key Observations
+- Supervised learning models leverage label information, allowing them to learn more precise decision boundaries.
+- Clustering models, without the guidance of labels, struggle to separate the data effectively, especially for complex real-world datasets like AutoMPG.
+- Supervised learning is clearly superior when labeled data is available.
+
+### Problem 4
+
+#### 4(a) When to Use Clustering vs Classification
+- **Data Label Availability:**
+  - Use clustering when labeled data is unavailable or expensive to obtain.
+  - Use classification when labeled data is available and reliable.
+
+- **Task Objective:**
+  - Clustering is suitable for exploring hidden structures and discovering natural groupings.
+  - Classification is suitable for prediction tasks requiring high accuracy and explainable models.
+
+- **Interpretability:**
+  - Classification models often offer better interpretability (e.g., decision trees, logistic regression).
+  - Clustering results may be harder to interpret without domain expertise.
+
+- **Deployment Constraints:**
+  - Classification models are often easier to validate, monitor, and deploy in production systems.
+  - Clustering models may be harder to monitor without explicit ground truth.
+
+#### 4(b) Handling Significant Differences Between Clustering and Labels
+- **Possible Explanations:**
+  - Data features do not capture the actual structure related to labels.
+  - High noise levels or overlapping classes in the feature space.
+  - Poor clustering parameters (e.g., wrong number of clusters, inappropriate distance metrics).
+
+- **How to Handle:**
+  - Perform feature engineering or dimensionality reduction (e.g., PCA) to better represent important structures.
+  - Experiment with different clustering algorithms and parameter tuning.
+  - Analyze cluster characteristics and relabel or adjust ground truth if appropriate.
+  - Accept that clustering may reveal alternative structures not directly matching the given labels and interpret them with domain knowledge.
